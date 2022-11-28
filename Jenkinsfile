@@ -2,27 +2,37 @@ def COLOR_MAP = [
     'SUCCESS': 'good', 
     'FAILURE': 'danger',
 ]
+
 pipeline {
-  agent any
-  environment {
-    WORKSPACE = "${env.WORKSPACE}"
-  }
-  tools {
-    maven 'localMaven'
-    jdk 'localJdk'
-  }
-  stages {
-    stage('Build') {
-      steps {
-        sh 'mvn clean package'
-      }
-      post {
-        success {
-          echo ' now Archiving '
-          archiveArtifacts artifacts: '**/*.war'
-        }
-      }
+    agent any
+    tools {
+        maven 'localMaven'
+        jdk 'localJdk'
     }
+    
+    environment{
+        WORKSPACE = "${env.WORKSPACE}"
+    }
+    stages {
+        stage('Git checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/nwamanu/Jenkins-CI-CD-Pipeline-Project.git'
+                
+            }
+        }
+        stage('Build') {
+            steps {
+                sh "mvn clean package"
+            }
+            
+            post {
+                success {
+                    archiveArtifacts artifacts: '**/*.war', followSymlinks: false
+                }
+            }
+        }
+        
+        
     stage('Unit Test'){
         steps {
             sh 'mvn test'
@@ -43,62 +53,92 @@ pipeline {
             }
         }
     }
-    stage('SonarQube Scan') {
-      steps {
-        sh """mvn sonar:sonar \
-              -Dsonar.projectKey=JavaWebApp \
-              -Dsonar.host.url=http://172.31.4.143:9000 \
-              -Dsonar.login=e9733df3fcd6ed54cef307d8ac4cc00eeb2d3611"""
-      }
+    
+    stage('SonarQube Scan'){
+        steps {
+            withSonarQubeEnv('SonarQube') {
+            sh '''
+            mvn sonar:sonar \
+            -Dsonar.projectKey=JavawebApp \
+            -Dsonar.host.url=http://172.31.22.53:9000 \
+            -Dsonar.login=0ab729eb7d92ae81816e3de03928276cfdd9c206
+            '''
+        }
     }
-    stage('Upload to Artifactory') {
-      steps {
-        sh "mvn clean deploy -DskipTests"
-      }
     }
+    
+    stage("Quality Gate"){
+        
+        steps{
+           
+       waitForQualityGate abortPipeline: true
+       
+  }
+    
+  }
+  
+    stage("Upload artifact to Nexus"){
+        
+        steps{
+           
+       sh 'mvn clean deploy -DskipTests'
+       
+  }
+    
+  }
+  
+    
     stage('Deploy to DEV') {
       environment {
         HOSTS = "dev"
       }
       steps {
+        sh 'ls'
         sh "ansible-playbook ${WORKSPACE}/deploy.yaml --extra-vars \"hosts=$HOSTS workspace_path=$WORKSPACE\""
       }
      }
-    // stage('Approval for stage') {
-    //   steps {
-    //     input('Do you want to proceed?')
-    //   }
-    // }
-    stage('Deploy to Stage') {
+     
+     
+    stage('Deploy to STAGE env') {
       environment {
-        HOSTS = "stage" // Make sure to update to "stage"
+        HOSTS = "stage"
       }
       steps {
+        sh 'ls'
         sh "ansible-playbook ${WORKSPACE}/deploy.yaml --extra-vars \"hosts=$HOSTS workspace_path=$WORKSPACE\""
       }
-    }
-    stage('Approval') {
+     }
+     
+     
+    
+     stage('Approval') {
       steps {
         input('Do you want to proceed?')
       }
-    }
-    stage('Deploy to PROD') {
+    } 
+     
+     
+     
+    stage('Deploy to PROD env') {
       environment {
         HOSTS = "prod"
       }
       steps {
+        sh 'ls'
         sh "ansible-playbook ${WORKSPACE}/deploy.yaml --extra-vars \"hosts=$HOSTS workspace_path=$WORKSPACE\""
       }
+     }
+  
+  
+  
+    
+        
     }
-  }
-  post {
-    always {
-        echo 'Slack Notifications.'
-        slackSend channel: '#mbandi-jenkins-cicd-pipeline-alerts', //update and provide your channel name
-        color: COLOR_MAP[currentBuild.currentResult],
-        message: "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} build ${env.BUILD_NUMBER} \n More info at: ${env.BUILD_URL}"
+    
+    post { 
+        always { 
+            echo 'I will always say Hello again!'
+            slackSend channel: '#m-w-jjtech-glorious-batch-group8', color: COLOR_MAP[currentBuild.currentResult], message: "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} build ${env.BUILD_NUMBER} \n More info at: ${env.BUILD_URL}"
+        }
     }
-  }
 }
-
-//slackSend channel: '#mbandi-cloudformation-cicd', message: "Please find the pipeline status of the following ${env.JOB_NAME ${env.BUILD_NUMBER} ${env.BUILD_URL}"
